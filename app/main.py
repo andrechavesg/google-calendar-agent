@@ -9,6 +9,9 @@ import logging
 from starlette.websockets import WebSocketState # Import needed for finally block
 import datetime # <<< ADDED
 
+# Import config loader
+from .config_loader import get_config
+
 # Assuming agent.py is in the same package directory
 from .agent import get_agent_executor_with_history, get_session_history
 
@@ -25,11 +28,29 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 # Use Jinja2Templates for rendering index.html potentially (optional here)
 templates = Jinja2Templates(directory=static_dir)
 
+# Load initial message from config
+# def load_initial_message():
+#     try:
+#         # Path relative to WORKDIR
+#         file_path = '/usr/src/app/initial_message.txt' # Correct path
+#         with open(file_path, 'r', encoding='utf-8') as f:
+#             return f.read().strip()
+#     except Exception as e:
+#         logger.error(f"Error loading initial_message.txt: {e}")
+#         return "Connected! How can I help?" # Fallback
+#
+# INITIAL_BOT_MESSAGE = load_initial_message()
+INITIAL_BOT_MESSAGE = get_config("initial_message", "Connected! How can I help?")
+
 @app.get("/")
 async def get(request: Request):
-    """Serve the index.html file."""
+    """Serve the index.html file using Jinja2 to inject the initial message."""
     # Using FileResponse is simpler if no template variables are needed
-    return FileResponse(os.path.join(static_dir, "index.html"))
+    # return FileResponse(os.path.join(static_dir, "index.html"))
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "initial_message": INITIAL_BOT_MESSAGE}
+    )
 
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):

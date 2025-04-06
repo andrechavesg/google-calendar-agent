@@ -7,24 +7,25 @@ from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain import hub
 from dotenv import load_dotenv
 from .tool import GoogleCalendarCLIWrapper
+from .config_loader import get_config
 
 load_dotenv()
 
 # --- Load Agent Prompt from File ---
-def load_agent_prompt():
-    try:
-        # Assumes agent_prompt.txt is in the WORKDIR (/usr/src/app)
-        prompt_file_path = '/usr/src/app/agent_prompt.txt' # Updated path
-        with open(prompt_file_path, 'r', encoding='utf-8') as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        print("ERROR: agent_prompt.txt not found at /usr/src/app/. Using basic default prompt.")
-        return "You are a helpful assistant." # Basic fallback
-    except Exception as e:
-         print(f"ERROR loading agent prompt: {e}. Falling back.")
-         return "You are a helpful assistant." # Basic fallback
+# def load_agent_prompt():
+#     try:
+#         # Assumes agent_prompt.txt is in the WORKDIR (/usr/src/app)
+#         prompt_file_path = '/usr/src/app/agent_prompt.txt' # Updated path
+#         with open(prompt_file_path, 'r', encoding='utf-8') as f:
+#             return f.read().strip()
+#     except FileNotFoundError:
+#         print("ERROR: agent_prompt.txt not found at /usr/src/app/. Using basic default prompt.")
+#         return "You are a helpful assistant." # Basic fallback
+#     except Exception as e:
+#          print(f"ERROR loading agent prompt: {e}. Falling back.")
+#          return "You are a helpful assistant." # Basic fallback
 
-AGENT_SYSTEM_PROMPT = load_agent_prompt()
+AGENT_SYSTEM_PROMPT = get_config("agent_system_prompt", "You are a helpful assistant.")
 # --- End Load Agent Prompt ---
 
 # In-memory store for chat histories
@@ -60,9 +61,9 @@ def initialize_agent_executor():
         # Access the underlying template messages
         # Find the system message (usually the first one) and update its content
         if prompt.messages and len(prompt.messages) > 0 and hasattr(prompt.messages[0], 'prompt') and hasattr(prompt.messages[0].prompt, 'template'):
-             # For newer Langchain structures where messages[0] might be SystemMessagePromptTemplate
+             # Use loaded system prompt
              prompt.messages[0].prompt.template = AGENT_SYSTEM_PROMPT
-             print("INFO: Updated Hub prompt system message from file.")
+             print("INFO: Updated Hub prompt system message from config.")
         else:
              # Fallback or older structures (might need adjustment based on actual prompt object)
              print("WARNING: Could not find system message in Hub prompt structure to update. Using default Hub system message.")

@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI # Needed for summarizer
 from langchain_core.prompts import ChatPromptTemplate # Needed for summarizer
 from langchain_core.output_parsers import StrOutputParser # Needed for summarizer
+from .config_loader import get_config # <<< ADDED
 
 load_dotenv()
 
@@ -20,19 +21,27 @@ logger = logging.getLogger(__name__)
 
 # --- Load Configurable Values ---
 
-# --- Load Tool Description from File ---
-def load_tool_description():
-    # Construct path relative to the WORKDIR (/usr/src/app)
-    try:
-        description_file_path = '/usr/src/app/calendar_tool_description.txt' # Updated path
-        # No need for abspath as we use a fixed path now
-        with open(description_file_path, 'r', encoding='utf-8') as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        logger.error("calendar_tool_description.txt not found at /usr/src/app/. Falling back.")
-# --- End Load Tool Description ---
+# Remove MAX_CALENDAR_RESULT_LENGTH loading
+MAX_CALENDAR_RESULT_LENGTH = get_config("max_calendar_result_length", 2000) # <<< Use config
 
-CALENDAR_TOOL_DESCRIPTION = load_tool_description()
+# Load Tool Description from config
+# def load_tool_description():
+#     try:
+#         # Path relative to WORKDIR
+#         description_file_path = '/usr/src/app/calendar_tool_description.txt' # Correct path
+#         # No need for abspath as we use a fixed path now
+#         with open(description_file_path, 'r', encoding='utf-8') as f:
+#             return f.read().strip()
+#     except FileNotFoundError:
+#         logger.error("calendar_tool_description.txt not found at /usr/src/app/. Falling back.")
+#         return "Manages Google Calendar events." # Basic fallback
+#     except Exception as e:
+#         logger.exception(f"Error loading tool description: {e}. Falling back.")
+#         return "Manages Google Calendar events." # Basic fallback
+#
+# CALENDAR_TOOL_DESCRIPTION = load_tool_description()
+CALENDAR_TOOL_DESCRIPTION = get_config("calendar_tool_description", "Calendar tool.") # <<< Use config
+# --- End Load Configurable Values ---
 
 # Get the path to the MCP server script from environment variables
 # Path is now set directly via ENV in Dockerfile
@@ -248,9 +257,8 @@ class GoogleCalendarSubprocessWrapper(BaseTool):
                             result_text = json.dumps(mcp_response["result"])
 
                         # <<< Summarize long results INSTEAD of truncating >>>
-                        MAX_LENGTH_BEFORE_SUMMARIZE = 2000 # Define the threshold
-                        if len(result_text) > MAX_LENGTH_BEFORE_SUMMARIZE:
-                             logger.warning(f"Calendar tool result length ({len(result_text)}) exceeds threshold ({MAX_LENGTH_BEFORE_SUMMARIZE}). Summarizing...")
+                        if len(result_text) > MAX_CALENDAR_RESULT_LENGTH:
+                             logger.warning(f"Calendar tool result length ({len(result_text)}) exceeds threshold ({MAX_CALENDAR_RESULT_LENGTH}). Summarizing...")
                              # Directly invoke the summarizer chain
                              try:
                                  summary = summarizer_chain.invoke({"text_to_summarize": result_text})
