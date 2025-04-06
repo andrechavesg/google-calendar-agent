@@ -41,15 +41,22 @@ templates = Jinja2Templates(directory=static_dir)
 #
 # INITIAL_BOT_MESSAGE = load_initial_message()
 INITIAL_BOT_MESSAGE = get_config("initial_message", "Connected! How can I help?")
+# Load chat title from config
+CHAT_TITLE = get_config("chat_title", "Chat with Calendar")
+# Load placeholder from config
+INPUT_PLACEHOLDER = get_config("input_placeholder", "Type your message...") # Added
 
 @app.get("/")
 async def get(request: Request):
-    """Serve the index.html file using Jinja2 to inject the initial message."""
-    # Using FileResponse is simpler if no template variables are needed
-    # return FileResponse(os.path.join(static_dir, "index.html"))
+    """Serve the index.html file using Jinja2 to inject configuration."""
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "initial_message": INITIAL_BOT_MESSAGE}
+        {
+            "request": request,
+            "initial_message": INITIAL_BOT_MESSAGE,
+            "chat_title": CHAT_TITLE,
+            "input_placeholder": INPUT_PLACEHOLDER # Pass placeholder to template
+        }
     )
 
 @app.websocket("/ws/{session_id}")

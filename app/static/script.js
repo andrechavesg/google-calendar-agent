@@ -2,9 +2,10 @@
 document.addEventListener('DOMContentLoaded', (event) => {
 
     const messagesDiv = document.getElementById('messages');
-    const messageInput = document.getElementById('messageInput');
-    const sendButton = document.querySelector('#input-area button');
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-button');
     const sessionIdSpan = document.getElementById('session-id');
+    const resetButton = document.getElementById('reset-button');
     console.log('DOM Loaded. Selected messageInput:', messageInput);
     console.log('DOM Loaded. Selected sendButton:', sendButton);
     let ws;
@@ -78,8 +79,15 @@ document.addEventListener('DOMContentLoaded', (event) => {
     }
 
     function setButtonState(enabled) {
-        if (sendButton) sendButton.disabled = !enabled;
-        if (messageInput) messageInput.disabled = !enabled;
+        console.log(`setButtonState called with enabled: ${enabled}`);
+        if (sendButton) {
+            console.log(`  - Setting sendButton.disabled to ${!enabled}`);
+            sendButton.disabled = !enabled;
+        }
+        if (messageInput) {
+             console.log(`  - Setting messageInput.disabled to ${!enabled}`);
+            messageInput.disabled = !enabled;
+        }
     }
 
     function sendMessage() {
@@ -108,11 +116,69 @@ document.addEventListener('DOMContentLoaded', (event) => {
          sendButton.addEventListener('click', sendMessage);
     }
 
+    // Reset button functionality
+    if (resetButton) {
+        resetButton.addEventListener('click', function() {
+            if (confirm('Are you sure you want to reset the chat session? This will clear your current chat history.')) {
+                // Clear the session ID from local storage
+                localStorage.removeItem('chatSessionId');
+                // Simple reset: Reload the page
+                location.reload();
+                // Optionally, you could call a backend endpoint to clear server-side session state if necessary
+            }
+        });
+    }
+
     // Initial setup
     setButtonState(false); // Disable button until connected
     connectWebSocket();
 
 }); // End DOMContentLoaded listener
+
+async function sendMessageToBackend(message) {
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-button');
+
+    // Disable input and button
+    if(messageInput) messageInput.disabled = true;
+    if(sendButton) sendButton.disabled = true;
+
+    const loadingIndicator = appendMessage('Bot', '', true); // Show loading indicator
+
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            // Make sure sessionId is defined and passed correctly
+            body: JSON.stringify({ message: message, session_id: window.sessionId || null }) // Example passing sessionId
+        });
+
+        chatBox.removeChild(loadingIndicator); // Remove loading indicator
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: 'Network response was not ok.' }));
+            appendMessage('Bot', `Error: ${errorData.detail || 'Failed to get response'}`);
+            console.error('Error sending message:', errorData);
+        } else {
+            const data = await response.json();
+            appendMessage('Bot', data.response);
+        }
+    } catch (error) {
+        if (chatBox.contains(loadingIndicator)) {
+             chatBox.removeChild(loadingIndicator); // Remove loading indicator on error too
+        }
+        appendMessage('Bot', 'Error: Could not connect to the server.');
+        console.error('Fetch error:', error);
+    }
+    finally {
+        // Re-enable input and button
+        if(messageInput) messageInput.disabled = false;
+        if(sendButton) sendButton.disabled = false;
+        if(messageInput) messageInput.focus(); // Focus input for next message
+    }
+}
 
 
 

@@ -7,13 +7,18 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body id="chat-container">
-    <h1>Chat with your Calendar (Session: <span id="session-id"></span>)</h1>
-    <div id="chatbox">
-        <div id="messages"></div>
-        <div id="input-area">
-            <input type="text" id="messageInput" placeholder="Ask about your calendar..." autocomplete="off">
-            <button onclick="sendMessage()">Send</button>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>{{ chat_title }} (Session: <span id="session-id">{{ session_id }}</span>)</h1>
+            <button id="reset-button" title="Reset Session">🔄</button>
         </div>
+        <div id="chat-box" class="chat-box">
+            <div id="messages"></div>
+        </div>
+        <form id="message-form" class="message-input-area">
+            <input type="text" id="message-input" placeholder="{{ input_placeholder }}" autocomplete="off">
+            <button type="submit" id="send-button">➤</button>
+        </form>
     </div>
 
     <!-- Hidden element to store initial message from server -->

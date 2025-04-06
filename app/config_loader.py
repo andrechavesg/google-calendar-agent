@@ -29,7 +29,7 @@ def load_config():
             agent_template = "\n".join(raw_config['agent_prompt_template'])
             # Store the raw template; formatting happens in agent.py
             CONFIG['agent_system_prompt_template'] = agent_template
-            # logger.info(f"Loaded agent prompt template: {agent_template[:100]}...")
+            logger.info(f"Loaded agent prompt template: {agent_template[:100]}...")
         else:
             CONFIG['agent_system_prompt_template'] = "You are a helpful assistant." # Fallback
             logger.error("agent_prompt_template is not a list in config.json")
