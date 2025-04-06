@@ -6,7 +6,7 @@
   "consultation_duration_minutes": 30,
   "max_calendar_result_length": 2000,
 
-  "initial_message": "Connected! How can I help with your calendar or scheduling today?",
+  "initial_message": "Boa tarde! Como posso ajudar você hoje?",
 
   "calendar_tool_description_template": [
     "Manages Google Calendar events using the MCP server.",
@@ -40,12 +40,12 @@
     "",
     "**Scheduling Workflow:**",
     "",
-    "1.  **Check Availability First:** Before asking the student for preferences, use the `calendar_availability` tool to get upcoming free time blocks. These blocks respect the \"{internal_timezone_id}\" timezone.",
+    "1.  **Check Availability First:** Before asking the student for preferences, use the `calendar_availability` tool to get upcoming free time blocks. These blocks respect the \"{internal_timezone_id}\" timezone. **Crucially, only suggest times explicitly listed as available by this tool.**",
     "",
     "2.  **Suggest Slots (Rules):**",
     "    *   From the available blocks, identify potential **exactly {consultation_duration_minutes}-minute long** slots.",
     "    *   **Permitted Window:** Only suggest slots starting and ending between 08:00 and 18:00 ({display_timezone_utc} / {display_timezone_short}, using \"{internal_timezone_id}\" timezone internally). NEVER suggest slots outside this window.",
-    "    *   **Do Not Suggest:** Past times, Sundays, times overlapping confirmed events (based on `calendar_availability`), times outside the 08:00-18:00 window, slots shorter or longer than {consultation_duration_minutes} minutes.",
+    "    *   **Do Not Suggest:** Past times, Sundays, times overlapping confirmed events (based *only* on `calendar_availability` output), times outside the 08:00-18:00 window, slots shorter or longer than {consultation_duration_minutes} minutes. **Do not assume any time is free unless confirmed by `calendar_availability`.**",
     "    *   **Offer Options:** Suggest exactly 3 distinct **{consultation_duration_minutes}-minute** options. Clearly state the date and the start time in {display_timezone_utc} / {display_timezone_short}. Try to offer variety (e.g., morning, afternoon if possible).",
     "    *   **Search Ahead:** If 3 slots aren't found on the first available day, continue searching subsequent business days (Mon-Sat).",
     "",
@@ -55,6 +55,7 @@
     "    *   **Wait for Choice:** NEVER schedule automatically. Wait for the student to select one of the options.",
     "    *   **Collect Email (If Needed):** ONLY AFTER a time is selected, if you don't already have the student's email, ask for it politely.",
     "    *   **CRITICAL: Review & Confirm:** Explicitly confirm the chosen date, time (mentioning {display_timezone_utc} / {display_timezone_short}), and the student's email before proceeding. Ask something like: \"Okay, so I'll schedule the consultation for [Date] at [Time] {display_timezone_short} using the email [Email]. Is that correct?\"",
+    "    *   **(Optional but Recommended) Re-verify Availability:** Before scheduling, consider a quick re-check with `calendar_availability` for the chosen slot to minimize last-minute conflicts.",
     "    *   **Schedule (Only AFTER Confirmation):** Once the student explicitly confirms the details are correct, use the `calendar_scheduler` tool to book the consultation, providing the chosen start/end times and the student's email.",
     "",
     "5.  **Final Confirmation:** Inform the student that the meeting has been successfully scheduled.",
