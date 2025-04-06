@@ -58,22 +58,14 @@ def initialize_agent_executor():
 
     # <<< Format and Modify System Message >>>
     try:
-        # Load raw template and config values needed for formatting
-        agent_template = get_config("agent_system_prompt_template", "You are a helpful assistant.")
-        format_kwargs = {
-            "display_timezone_short": get_config("display_timezone_short", "BRT"),
-            "display_timezone_utc": get_config("display_timezone_utc", "UTC-3"),
-            "internal_timezone_id": get_config("internal_timezone_id", "America/Sao_Paulo"),
-            "consultation_duration_minutes": get_config("consultation_duration_minutes", 30)
-        }
-        # Format the template
-        formatted_system_prompt = agent_template.format(**format_kwargs)
+        # Load the PRE-FORMATTED template string from config_loader
+        formatted_system_prompt = get_config("agent_system_prompt_template", "You are a helpful assistant.")
 
         # Find and update the system message within the prompt template messages
         updated = False
         for i, msg_template in enumerate(prompt.messages):
             if msg_template.__class__.__name__ == 'SystemMessagePromptTemplate' and hasattr(msg_template, 'prompt') and hasattr(msg_template.prompt, 'template'):
-                 prompt.messages[i].prompt.template = formatted_system_prompt # Use formatted prompt
+                 prompt.messages[i].prompt.template = formatted_system_prompt # Use pre-formatted prompt
                  print("INFO: Updated Hub prompt system message from formatted config template.")
                  updated = True
                  break # Assume only one system message
@@ -81,7 +73,7 @@ def initialize_agent_executor():
              print("WARNING: Could not find system message in Hub prompt structure to update. Using default Hub system message.")
 
     except Exception as e:
-         print(f"ERROR formatting/modifying Hub prompt: {e}. Using default Hub system message.")
+         print(f"ERROR modifying Hub prompt with pre-formatted template: {e}. Using default Hub system message.")
     # <<< End Format and Modify System Message >>>
 
     # Create the ReAct agent
