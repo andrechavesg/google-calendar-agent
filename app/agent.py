@@ -4,30 +4,16 @@ from langchain.agents import AgentExecutor, create_react_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain import hub
 from dotenv import load_dotenv
-from tool import GoogleCalendarCLIWrapper
+from tool import GoogleCalendarCLIWrapper, VectorStoreSitemapTool
 from config_loader import get_config
 from langchain.tools.render import render_text_description
 
 load_dotenv()
 
-# --- Load Agent Prompt from File ---
-# def load_agent_prompt():
-#     try:
-#         # Assumes agent_prompt.txt is in the WORKDIR (/usr/src/app)
-#         prompt_file_path = '/usr/src/app/agent_prompt.txt' # Updated path
-#         with open(prompt_file_path, 'r', encoding='utf-8') as f:
-#             return f.read().strip()
-#     except FileNotFoundError:
-#         print("ERROR: agent_prompt.txt not found at /usr/src/app/. Using basic default prompt.")
-#         return "You are a helpful assistant." # Basic fallback
-#     except Exception as e:
-#          print(f"ERROR loading agent prompt: {e}. Falling back.")
-#          return "You are a helpful assistant." # Basic fallback
+# --- Removed loading agent prompt from file ---
 
-# AGENT_SYSTEM_PROMPT = get_config("agent_system_prompt", "You are a helpful assistant.")
-# --- End Load Agent Prompt ---
+# --- Removed global AGENT_SYSTEM_PROMPT ---
 
 # In-memory store for chat histories
 message_history_store = {}
@@ -37,8 +23,9 @@ def get_session_history(session_id: str) -> ChatMessageHistory:
         message_history_store[session_id] = ChatMessageHistory()
     return message_history_store[session_id]
 
-def initialize_agent_executor():
-    """Initializes and returns the LangChain agent executor with message history."""
+# Renamed function and added parameters: system_prompt_template_str, tools_list
+def create_agent_executor_with_history(system_prompt_template_str: str, tools_list: list):
+    """Creates and returns a LangChain agent executor with message history, configured with the provided system prompt and tools."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key or api_key == "YOUR_OPENAI_API_KEY_HERE":
         raise ValueError("OPENAI_API_KEY not found or not set in .env file.")
@@ -46,19 +33,16 @@ def initialize_agent_executor():
     # Initialize the LLM
     llm = ChatOpenAI(model="gpt-4o", temperature=0.2, openai_api_key=api_key)
 
-    # Initialize tools
-    tools_list = [
-        GoogleCalendarCLIWrapper()
-        # Hypothetical tools to be added:
-        # CalendarAvailabilityTool(),
-        # CalendarSchedulerTool(),
-    ]
+    # --- Tools are now passed in via tools_list parameter ---
+    # tools_list = [
+    #     GoogleCalendarCLIWrapper()
+    # ]
 
-    # --- Load System Prompt from Config ---
-    system_prompt_template_str = get_config("agent_system_prompt_template", "You are a helpful assistant.")
-    print(f"INFO: Using system prompt template from config.") # Simplified log
+    # --- System Prompt is now passed in via system_prompt_template_str parameter ---
+    # system_prompt_template_str = get_config("agent_system_prompt_template", "You are a helpful assistant.")
+    # print(f"INFO: Using system prompt template from config.")
 
-    # --- Create ChatPromptTemplate directly ---
+    # --- Create ChatPromptTemplate directly using the passed-in prompt string ---
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt_template_str),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -93,12 +77,13 @@ def initialize_agent_executor():
     )
     return agent_with_chat_history
 
-# Initialize it once
-agent_executor_with_history = initialize_agent_executor()
+# --- Removed global agent_executor_with_history initialization ---
+# agent_executor_with_history = initialize_agent_executor()
 
-def get_agent_executor_with_history() -> RunnableWithMessageHistory:
-     """Returns the initialized LangChain agent executor with message history."""
-     return agent_executor_with_history
+# --- Removed get_agent_executor_with_history() function ---
+# def get_agent_executor_with_history() -> RunnableWithMessageHistory:
+#      """Returns the initialized LangChain agent executor with message history."""
+#      return agent_executor_with_history
 
 
 

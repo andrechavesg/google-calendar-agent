@@ -9,6 +9,7 @@ langchain-openai
 langchain-community
 langsmith
 requests
+httpx
 
 
 

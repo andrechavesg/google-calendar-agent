@@ -11,12 +11,16 @@ import datetime # <<< ADDED
 import json # Add json import
 import asyncio # Add asyncio import
 from langchain_openai import ChatOpenAI
+import httpx # <-- Add httpx for API calls
 
 # Import config loader (use absolute import)
 from config_loader import get_config
 
 # Assuming agent.py is in the same package directory (use absolute import)
-from agent import get_agent_executor_with_history, get_session_history
+from agent import create_agent_executor_with_history, get_session_history
+
+# Import tools
+from tool import GoogleCalendarCLIWrapper, VectorStoreSitemapTool # Changed to VectorStoreSitemapTool
 
 logging.basicConfig(level=logging.DEBUG) # Set to DEBUG
 logger = logging.getLogger(__name__)
@@ -40,6 +44,31 @@ CHAT_TITLE = get_config("chat_title", "Chat with Calendar")
 # Load placeholder from config
 INPUT_PLACEHOLDER = get_config("input_placeholder", "Type your message...") # Added
 
+# Load configuration values
+QUALIFICATION_PROMPT = get_config("qualification_agent_system_prompt_template", "Error: Qual prompt missing")
+SCHEDULING_PROMPT = get_config("scheduling_agent_system_prompt_template", "Error: Sched prompt missing")
+QUALIFICATION_API_URL = get_config("qualification_api_url", "")
+NOT_QUALIFIED_MESSAGE_TEMPLATE = get_config("not_qualified_message", "Not qualified.")
+NOT_QUALIFIED_PDF_URL = get_config("not_qualified_pdf_url", "")
+
+# --- Define Tool Lists ---
+# Qualification agent only needs the vector store tool
+qualification_tools = [VectorStoreSitemapTool()] # Changed to VectorStoreSitemapTool
+
+# Scheduling agent needs calendar tools
+# TODO: Confirm if CalendarAvailabilityTool/CalendarSchedulerTool are separate or part of GoogleCalendarCLIWrapper
+scheduling_tools = [GoogleCalendarCLIWrapper()]
+# scheduling_tools = [
+#     GoogleCalendarCLIWrapper(),
+#     CalendarAvailabilityTool(), # If separate
+#     CalendarSchedulerTool(),   # If separate
+# ]
+
+# Dictionary to store session states (e.g., "qualification", "scheduling")
+session_states = {}
+# Dictionary to store agent executors per session
+session_executors = {}
+
 @app.get("/")
 async def get(request: Request):
     """Serve the index.html file using Jinja2 to inject configuration."""
@@ -53,20 +82,35 @@ async def get(request: Request):
         }
     )
 
+async def initialize_session(session_id: str):
+    """Initializes the state and agent executor for a new session."""
+    logger.info(f"Initializing session {session_id}...")
+    session_states[session_id] = "qualification" # Start in qualification mode
+    try:
+        logger.info(f"Creating QUALIFICATION agent executor for session {session_id}...")
+        agent_executor = create_agent_executor_with_history(
+            system_prompt_template_str=QUALIFICATION_PROMPT,
+            tools_list=qualification_tools
+        )
+        session_executors[session_id] = agent_executor
+        logger.info(f"Qualification agent executor created successfully for session {session_id}.")
+        return agent_executor
+    except Exception as init_error:
+        logger.error(f"Failed to initialize QUALIFICATION agent executor for session {session_id}: {init_error}", exc_info=True)
+        raise # Re-raise the exception to be caught by the websocket handler
+
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """Handles WebSocket connections for chat, supporting streaming."""
     await websocket.accept()
     logger.info(f"WebSocket connection accepted for session: {session_id}")
 
-    # Initialize agent executor lazily for this connection
+    # Initialize session state and the first (qualification) agent executor
     try:
-        logger.info(f"Initializing agent executor for session {session_id}...")
-        agent_executor = get_agent_executor_with_history() 
-        logger.info(f"Agent executor initialized successfully for session {session_id}.")
+        agent_executor = await initialize_session(session_id)
     except Exception as init_error:
-        logger.error(f"Failed to initialize agent executor for session {session_id}: {init_error}", exc_info=True)
-        error_message = f"Failed to initialize agent: {str(init_error)}"
+        # Handle initialization error - inform client and close
+        error_message = f"Failed to initialize agent session: {str(init_error)}"
         try:
             await websocket.send_text(json.dumps({"type": "error", "message": error_message}))
             await websocket.close(code=1011) # Internal Error
@@ -83,6 +127,20 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             data = await websocket.receive_text()
             logger.info(f"Received message from {session_id}: {data}")
 
+            # Get the current agent executor for the session
+            # It might change if the state transitions
+            current_executor = session_executors.get(session_id)
+            if not current_executor:
+                 logger.error(f"Agent executor not found for session {session_id}. Reinitializing.")
+                 try:
+                     # Attempt re-initialization (might default to qualification)
+                     current_executor = await initialize_session(session_id)
+                 except Exception as reinit_error:
+                     error_message = f"Failed to re-initialize agent: {str(reinit_error)}"
+                     await websocket.send_text(json.dumps({"type": "error", "message": error_message}))
+                     await websocket.close(code=1011)
+                     return
+
             try: # Inner try for processing a single message
                 # <<< ADD Current Date/Time to input >>>
                 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z%z")
@@ -98,22 +156,116 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 await websocket.send_text(json.dumps({"type": "start"}))
                 logger.info(f"Sent 'start' signal for {session_id}")
 
-                # --- Revert to simpler streaming/invocation --- 
-                # Get the final response (using astream which might still be slightly faster)
-                final_output = "(No output generated)" # Default message
+                # --- Agent Invocation and State Handling --- 
+                final_output = "(No output generated)" 
+                agent_response_json = None # To store parsed JSON if applicable
+                
                 try:
-                    logger.info(f"Streaming/invoking agent for final answer for session {session_id}...")
-                    async for chunk in agent_executor.astream({"input": enhanced_input}, config=config):
-                        # Assume the relevant output is in the 'output' key for the final chunk(s)
+                    logger.info(f"Streaming/invoking {session_states.get(session_id, 'unknown')} agent for session {session_id}...")
+                    async for chunk in current_executor.astream({"input": enhanced_input}, config=config):
                         if "output" in chunk and isinstance(chunk["output"], str):
                             final_output = chunk["output"]
-                            # We only care about the final output chunk here
                             
-                    logger.info(f"Agent execution finished for session {session_id}. Output length: {len(final_output)}")
+                    logger.info(f"Agent execution finished for session {session_id}. Raw output length: {len(final_output)}")
                     
-                    # Send the complete final answer to the frontend
-                    await websocket.send_text(json.dumps({"type": "final_answer", "message": final_output}))
-                    logger.info(f"Sent final answer for {session_id}")
+                    # --- State-Specific Output Processing ---
+                    current_state = session_states.get(session_id, "qualification")
+                    
+                    if current_state == "qualification":
+                        # Log the raw output *before* trying to parse, adding markers for clarity
+                        logger.info(f"Processing QUALIFICATION agent output for {session_id}. Raw output:\n>>>\n{final_output}\n<<<" )
+                        
+                        parsed_json = None
+                        try:
+                            # Attempt 1: Direct parse
+                            parsed_json = json.loads(final_output)
+                            logger.info(f"Direct JSON parse successful for {session_id}")
+                        except json.JSONDecodeError:
+                            logger.warning(f"Direct JSON parse failed for {session_id}. Trying markdown extraction...")
+                            try:
+                                # Attempt 2: Extract from markdown
+                                import re
+                                # Added re.IGNORECASE just in case
+                                match = re.search(r"```json\s*({.*?})\s*```", final_output, re.DOTALL | re.IGNORECASE)
+                                if match:
+                                    json_str = match.group(1)
+                                    parsed_json = json.loads(json_str) # Assign result here
+                                    logger.info(f"Successfully parsed JSON extracted from markdown for {session_id}")
+                                else:
+                                    logger.warning(f"Markdown extraction failed for {session_id}. No ```json block found.")
+                                    # parsed_json remains None
+                            except Exception as e_extract: # Catch potential regex or inner parse errors
+                                 logger.error(f"Error during markdown extraction/parsing for {session_id}: {e_extract}")
+                                 # parsed_json remains None
+
+                        # --- Check results of parsing attempts --- 
+                        if parsed_json and "chat_output" in parsed_json:
+                            # Ideal Path: Send extracted chat_output
+                            await websocket.send_text(json.dumps({"type": "final_answer", "message": parsed_json["chat_output"]}))
+                            logger.info(f"Sent 'chat_output' from qualification agent for {session_id}")
+
+                            # Check if qualification is done (only if parsing succeeded and chat_output present)
+                            if parsed_json.get("done") is True:
+                                logger.info(f"Qualification marked as 'done' for session {session_id}. Calling API.")
+                                collected_data = parsed_json.get("collected_data", {})
+                                
+                                # Call the qualification API
+                                async with httpx.AsyncClient() as client:
+                                    try:
+                                        api_response = await client.post(QUALIFICATION_API_URL, json=collected_data, timeout=30.0) # Added timeout
+                                        api_response.raise_for_status() # Raise HTTP errors
+                                        qualification_result = api_response.json() # Assuming API returns JSON
+                                        logger.info(f"Qualification API call successful for {session_id}. Result: {qualification_result}")
+                                        
+                                        # --- Check qualification based on API response structure ---
+                                        # Old: Assume API returns {'qualified': True/False}
+                                        # is_qualified = qualification_result.get("qualified", False)
+                                        # New: Check 'classificacao' field is 1
+                                        is_qualified = qualification_result.get("classificacao") == 1
+                                        # --- End Check ---
+                                        
+                                        if is_qualified:
+                                            logger.info(f"User {session_id} QUALIFIED. Transitioning to scheduling agent.")
+                                            session_states[session_id] = "scheduling"
+                                            # Create and store the scheduling agent executor
+                                            logger.info(f"Creating SCHEDULING agent executor for session {session_id}...")
+                                            scheduling_executor = create_agent_executor_with_history(
+                                                system_prompt_template_str=SCHEDULING_PROMPT,
+                                                tools_list=scheduling_tools
+                                            )
+                                            session_executors[session_id] = scheduling_executor
+                                            logger.info(f"Scheduling agent executor created and stored for session {session_id}.")
+                                            # Optionally send a transition message to the client
+                                            # await websocket.send_text(json.dumps({"type": "info", "message": "Ótimo! Agora podemos verificar a agenda..."}))
+                                            # Let the scheduling agent handle the next interaction naturally
+                                            
+                                        else:
+                                            logger.info(f"User {session_id} NOT QUALIFIED. Sending message and closing.")
+                                            # Format the 'not qualified' message
+                                            formatted_nq_message = NOT_QUALIFIED_MESSAGE_TEMPLATE.format(not_qualified_pdf_url=NOT_QUALIFIED_PDF_URL)
+                                            await websocket.send_text(json.dumps({"type": "final_answer", "message": formatted_nq_message}))
+                                            await websocket.close(code=1000) # Normal closure
+                                            return # End the handler for this session
+                                            
+                                    except httpx.RequestError as api_req_err:
+                                        logger.error(f"Qualification API request error for session {session_id}: {api_req_err}", exc_info=True)
+                                        await websocket.send_text(json.dumps({"type": "error", "message": "Could not reach qualification service."}))
+                                    except httpx.HTTPStatusError as api_stat_err:
+                                         logger.error(f"Qualification API status error for session {session_id}: {api_stat_err}", exc_info=True)
+                                         await websocket.send_text(json.dumps({"type": "error", "message": f"Qualification service error: {api_stat_err.response.status_code}"}))
+                                    except json.JSONDecodeError as api_json_err:
+                                        logger.error(f"Qualification API response JSON decode error for {session_id}: {api_json_err}", exc_info=True)
+                                        await websocket.send_text(json.dumps({"type": "error", "message": "Invalid response from qualification service."}))
+                                
+                    elif current_state == "scheduling":
+                        logger.info(f"Processing SCHEDULING agent output for {session_id}")
+                        # Send the complete final answer from scheduling agent
+                        await websocket.send_text(json.dumps({"type": "final_answer", "message": final_output}))
+                        logger.info(f"Sent final answer from scheduling agent for {session_id}")
+                        
+                    else: # Should not happen
+                         logger.error(f"Invalid session state '{current_state}' for session {session_id}")
+                         await websocket.send_text(json.dumps({"type": "error", "message": "Internal state error."}))
 
                 except Exception as agent_error:
                     logger.error(f"Agent execution error for session {session_id}: {agent_error}", exc_info=True)
@@ -151,6 +303,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         except Exception as ws_send_error:
             logger.error(f"Could not send initial error to client {session_id}: {ws_send_error}")
     finally:
+        # Clean up session state and executor when client disconnects
+        if session_id in session_states:
+            del session_states[session_id]
+            logger.info(f"Removed state for session {session_id}")
+        if session_id in session_executors:
+            del session_executors[session_id]
+            logger.info(f"Removed agent executor for session {session_id}")
+            
         # Ensure websocket is closed if it's still open
         if websocket.client_state != WebSocketState.DISCONNECTED:
              logger.info(f"Closing WebSocket connection for session {session_id} in finally block.")

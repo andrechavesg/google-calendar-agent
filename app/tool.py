@@ -3,7 +3,7 @@ import os
 import logging
 import json # Added for MCP JSON handling
 import uuid # Added for potential request IDs
-from typing import Any, Optional
+from typing import Any, Optional, Type
 from langchain_core.tools import BaseTool
 # from langchain_core.pydantic_v1 import Field, root_validator # Deprecated
 from pydantic.v1 import Field, root_validator # Use v1 namespace for compatibility
@@ -12,6 +12,10 @@ from langchain_openai import ChatOpenAI # Needed for summarizer
 from langchain_core.prompts import ChatPromptTemplate # Needed for summarizer
 from langchain_core.output_parsers import StrOutputParser # Needed for summarizer
 from config_loader import get_config # <<< ADDED
+from langchain.tools import BaseTool
+from langchain_core.callbacks import CallbackManagerForToolRun
+from pydantic import BaseModel
+import httpx  # <-- Add httpx import
 
 load_dotenv()
 
@@ -24,21 +28,6 @@ logger = logging.getLogger(__name__)
 # Remove MAX_CALENDAR_RESULT_LENGTH loading
 MAX_CALENDAR_RESULT_LENGTH = get_config("max_calendar_result_length", 2000) # <<< Use config
 
-# Load Tool Description from config
-# def load_tool_description():
-#     try:
-#         # Path relative to WORKDIR
-#         description_file_path = '/usr/src/app/calendar_tool_description.txt' # Correct path
-#         # No need for abspath as we use a fixed path now
-#         with open(description_file_path, 'r', encoding='utf-8') as f:
-#             return f.read().strip()
-#     except FileNotFoundError:
-#         logger.error("calendar_tool_description.txt not found at /usr/src/app/. Falling back.")
-#         return "Manages Google Calendar events." # Basic fallback
-#     except Exception as e:
-#         logger.exception(f"Error loading tool description: {e}. Falling back.")
-#         return "Manages Google Calendar events." # Basic fallback
-#
 # CALENDAR_TOOL_DESCRIPTION = load_tool_description()
 CALENDAR_TOOL_DESCRIPTION = get_config("calendar_tool_description", "Calendar tool.") # <<< Use config
 # --- End Load Configurable Values ---
@@ -570,6 +559,93 @@ class GoogleCalendarSubprocessWrapper(BaseTool):
 
 # Rename the class reference to maintain compatibility with agent.py
 GoogleCalendarCLIWrapper = GoogleCalendarSubprocessWrapper
+
+# Schema for the Vector Store Tool input
+class VectorStoreInput(BaseModel):
+    query: str = Field(description="The user query for semantic search.")
+
+# Placeholder class for the Vector Store Tool
+class VectorStoreSitemapTool(BaseTool):
+    """Tool to query a semantic vector store built from a sitemap."""
+
+    name: str = "vector_store_sitemap"
+    description: str = get_config("vector_store_tool_description", "Query a vector store based on website data.")
+    args_schema: Type[BaseModel] = VectorStoreInput
+    data_url: str = get_config("vector_store_data_url", "")
+
+    def _run(
+        self, query: str, run_manager: Optional[CallbackManagerForToolRun] = None
+    ) -> str:
+        """Use the tool by fetching data from the configured URL."""
+        logger.info(f"VectorStoreSitemapTool received query: {query}")
+        logger.info(f"VectorStoreSitemapTool attempting to fetch data from: {self.data_url}")
+
+        if not self.data_url:
+            logger.error("VectorStoreSitemapTool error: data_url is not configured.")
+            return "Error: Vector store data URL is not configured."
+
+        try:
+            response = httpx.get(self.data_url, timeout=30.0)
+            response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+            
+            # Return the entire JSON content as a string
+            # Langchain tools expect string output
+            json_content = response.json() # Parse JSON first to ensure validity
+            response_string = json.dumps(json_content, ensure_ascii=False, indent=2) # Return pretty-printed JSON string
+            
+            logger.info(f"VectorStoreSitemapTool successfully fetched data. Returning content (length: {len(response_string)}). First 200 chars: {response_string[:200]}...")
+            # TODO: Implement actual semantic search on the fetched content based on the 'query'
+            return response_string 
+
+        except httpx.RequestError as exc:
+            logger.error(f"VectorStoreSitemapTool request error while fetching {self.data_url}: {exc}")
+            return f"Error: Could not fetch vector store data. Request failed: {exc}"
+        except httpx.HTTPStatusError as exc:
+            logger.error(f"VectorStoreSitemapTool HTTP status error while fetching {self.data_url}: {exc}")
+            return f"Error: Could not fetch vector store data. Status code: {exc.response.status_code}"
+        except json.JSONDecodeError as exc:
+             logger.error(f"VectorStoreSitemapTool JSON decode error for content from {self.data_url}: {exc}")
+             return f"Error: Fetched data from {self.data_url} is not valid JSON."
+        except Exception as exc:
+            logger.exception(f"VectorStoreSitemapTool unexpected error: {exc}")
+            return f"Error: An unexpected error occurred in the vector store tool: {exc}"
+
+    async def _arun(
+        self, query: str, run_manager: Optional[CallbackManagerForToolRun] = None
+    ) -> str:
+        """Use the tool asynchronously by fetching data from the configured URL."""
+        logger.info(f"VectorStoreSitemapTool received async query: {query}")
+        logger.info(f"VectorStoreSitemapTool attempting async fetch data from: {self.data_url}")
+        
+        if not self.data_url:
+            logger.error("VectorStoreSitemapTool async error: data_url is not configured.")
+            return "Error: Vector store data URL is not configured."
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(self.data_url, timeout=30.0)
+                response.raise_for_status()
+                
+                # Return the entire JSON content as a string
+                json_content = response.json()
+                response_string = json.dumps(json_content, ensure_ascii=False, indent=2)
+
+                logger.info(f"VectorStoreSitemapTool successfully fetched data async. Returning content (length: {len(response_string)}). First 200 chars: {response_string[:200]}...")
+                # TODO: Implement actual async semantic search on the fetched content based on the 'query'
+                return response_string
+
+            except httpx.RequestError as exc:
+                logger.error(f"VectorStoreSitemapTool async request error while fetching {self.data_url}: {exc}")
+                return f"Error: Could not fetch vector store data. Request failed: {exc}"
+            except httpx.HTTPStatusError as exc:
+                logger.error(f"VectorStoreSitemapTool async HTTP status error while fetching {self.data_url}: {exc}")
+                return f"Error: Could not fetch vector store data. Status code: {exc.response.status_code}"
+            except json.JSONDecodeError as exc:
+                logger.error(f"VectorStoreSitemapTool async JSON decode error for content from {self.data_url}: {exc}")
+                return f"Error: Fetched data from {self.data_url} is not valid JSON."
+            except Exception as exc:
+                logger.exception(f"VectorStoreSitemapTool async unexpected error: {exc}")
+                return f"Error: An unexpected error occurred in the vector store tool: {exc}"
 
 
 
