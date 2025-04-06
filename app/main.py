@@ -18,11 +18,10 @@ from config_loader import get_config
 # Assuming agent.py is in the same package directory (use absolute import)
 from agent import get_agent_executor_with_history, get_session_history
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG) # Set to DEBUG
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-# agent_executor = get_agent_executor_with_history() # Comment out global initialization
 
 # Mount static files (HTML, CSS, JS)
 # Get directory containing main.py and join with 'static'
@@ -34,17 +33,6 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 # Ensure Jinja also uses the correct static directory path
 templates = Jinja2Templates(directory=static_dir)
 
-# Load initial message from config
-# def load_initial_message():
-#     try:
-#         # Path relative to WORKDIR
-#         file_path = '/usr/src/app/initial_message.txt' # Correct path
-#         with open(file_path, 'r', encoding='utf-8') as f:
-#             return f.read().strip()
-#     except Exception as e:
-#         logger.error(f"Error loading initial_message.txt: {e}")
-#         return "Connected! How can I help?" # Fallback
-#
 # INITIAL_BOT_MESSAGE = load_initial_message()
 INITIAL_BOT_MESSAGE = get_config("initial_message", "Connected! How can I help?")
 # Load chat title from config
@@ -110,52 +98,31 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 await websocket.send_text(json.dumps({"type": "start"}))
                 logger.info(f"Sent 'start' signal for {session_id}")
 
-                # Stream the agent's response
-                full_response = ""
-                agent_timed_out = False # Flag to track timeout
+                # --- Revert to simpler streaming/invocation --- 
+                # Get the final response (using astream which might still be slightly faster)
+                final_output = "(No output generated)" # Default message
                 try:
-                    logger.info(f"Starting agent stream for session {session_id}...")
-                    # Wrap the stream iteration with a timeout
-                    stream_iterator = agent_executor.astream({"input": enhanced_input}, config=config)
-                    while True:
-                        try:
-                            # Wait for the next chunk with a timeout
-                            chunk = await asyncio.wait_for(stream_iterator.__anext__(), timeout=60.0) 
-                            # Check for final answer tokens
-                            if "output" in chunk and isinstance(chunk["output"], str):
-                                token = chunk["output"]
-                                if token:
-                                    await websocket.send_text(json.dumps({"type": "stream", "token": token}))
-                                    full_response += token
-                            # Optional: Log other chunk types for debugging if needed
-                        except StopAsyncIteration:
-                            # Stream finished normally
-                            logger.info(f"Agent stream finished normally for session {session_id}.")
-                            break # Exit the while loop
-                        except asyncio.TimeoutError:
-                            agent_timed_out = True
-                            logger.error(f"Agent stream timed out after 60 seconds for session {session_id}.")
-                            error_message = "The request timed out while waiting for the agent's response."
-                            await websocket.send_text(json.dumps({"type": "error", "message": error_message}))
-                            break # Exit the while loop on timeout
+                    logger.info(f"Streaming/invoking agent for final answer for session {session_id}...")
+                    async for chunk in agent_executor.astream({"input": enhanced_input}, config=config):
+                        # Assume the relevant output is in the 'output' key for the final chunk(s)
+                        if "output" in chunk and isinstance(chunk["output"], str):
+                            final_output = chunk["output"]
+                            # We only care about the final output chunk here
+                            
+                    logger.info(f"Agent execution finished for session {session_id}. Output length: {len(final_output)}")
+                    
+                    # Send the complete final answer to the frontend
+                    await websocket.send_text(json.dumps({"type": "final_answer", "message": final_output}))
+                    logger.info(f"Sent final answer for {session_id}")
 
-                    if not agent_timed_out:
-                        logger.info(f"Agent stream finished for session {session_id}. Full response length: {len(full_response)}")
-                        await websocket.send_text(json.dumps({"type": "end"}))
-                        logger.info(f"Sent 'end' signal for {session_id}")
-                    else: 
-                        # If it timed out, we already sent error, just send end
-                         await websocket.send_text(json.dumps({"type": "end"})) 
-                         logger.info(f"Sent 'end' signal for {session_id} after timeout.")
-
-
-                except Exception as stream_error:
-                    # Catch errors other than TimeoutError during streaming setup or processing
-                    logger.error(f"Agent streaming error for session {session_id}: {stream_error}", exc_info=True)
-                    error_message = f"An error occurred during processing: {str(stream_error)}"
+                except Exception as agent_error:
+                    logger.error(f"Agent execution error for session {session_id}: {agent_error}", exc_info=True)
+                    error_message = f"An error occurred during processing: {str(agent_error)}"
                     await websocket.send_text(json.dumps({"type": "error", "message": error_message}))
-                    await websocket.send_text(json.dumps({"type": "end"})) # Ensure state resets
-                    logger.info(f"Sent 'error' and 'end' signals for {session_id} after stream error.")
+                
+                # Always send end signal regardless of success or error
+                await websocket.send_text(json.dumps({"type": "end"}))
+                logger.info(f"Sent 'end' signal for {session_id}")
 
             except Exception as processing_error:
                 # Catch errors during message processing BEFORE streaming starts

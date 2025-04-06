@@ -171,17 +171,45 @@ body {
      background-color: #a0d2ff; /* Specific disabled background for button */
 }
 
-/* Blinking cursor for streaming messages */
+/* Loading indicator for streaming messages */
+/* Replace fading bar with a pulsing dot */
 .bot-message.streaming::after {
-  content: '▋'; /* Blinking cursor character */
-  animation: blink 1s step-end infinite;
-  display: inline-block; /* Prevents line break */
-  margin-left: 2px;
+  content: ""; /* Empty content */
+  display: inline-block;
+  width: 6px;  /* Dot size */
+  height: 6px; /* Dot size */
+  background-color: #888; /* Dot color (adjust as needed) */
+  border-radius: 50%; /* Make it round */
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: pulse-dot 1.4s infinite ease-in-out both;
 }
 
-@keyframes blink {
-  from, to { color: transparent; }
-  50% { color: #050505; } /* Match bot message text color */
+/* Animation for the pulsing dot */
+@keyframes pulse-dot {
+  0%, 80%, 100% {
+    transform: scale(0);
+    opacity: 0.5;
+  } 
+  40% {
+    transform: scale(1.0);
+    opacity: 1;
+  } 
+}
+
+/* Add specific style for status messages */
+.system-message.status {
+    font-style: italic;
+    color: #555;
+    background-color: #f0f0f0;
+    padding: 5px 10px;
+    font-size: 0.85em;
+    text-align: left;
+    max-width: 80%;
+    align-self: flex-start; /* Align to left */
+    border-radius: 10px;
+    margin-top: 5px;
+    margin-bottom: 5px;
 }
 
 
