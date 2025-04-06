@@ -31,6 +31,7 @@ WORKDIR /usr/src/app
 # --- Copy Application Code ---
 COPY ./app /usr/src/app/app
 COPY ./calendar_tool_description.txt /usr/src/app/calendar_tool_description.txt
+COPY ./agent_prompt.txt /usr/src/app/agent_prompt.txt
 
 # --- Set Runtime Environment Variables ---
 # Set the path for the MCP script *built inside the image*
