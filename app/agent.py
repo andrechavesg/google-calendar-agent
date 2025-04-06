@@ -53,28 +53,17 @@ def initialize_agent_executor():
         # CalendarSchedulerTool(),
     ]
 
-    # Get the ReAct prompt template supporting history
-    prompt = hub.pull("hwchase17/react-chat")
+    # --- Load System Prompt from Config ---
+    system_prompt_template = get_config("agent_system_prompt_template", "You are a helpful assistant.")
+    print(f"INFO: System prompt template: {system_prompt_template}")
 
-    # <<< Format and Modify System Message >>>
-    try:
-        # Load the PRE-FORMATTED template string from config_loader
-        formatted_system_prompt = get_config("agent_system_prompt_template", "You are a helpful assistant.")
-
-        # Find and update the system message within the prompt template messages
-        updated = False
-        for i, msg_template in enumerate(prompt.messages):
-            if msg_template.__class__.__name__ == 'SystemMessagePromptTemplate' and hasattr(msg_template, 'prompt') and hasattr(msg_template.prompt, 'template'):
-                 prompt.messages[i].prompt.template = formatted_system_prompt # Use pre-formatted prompt
-                 print("INFO: Updated Hub prompt system message from formatted config template.")
-                 updated = True
-                 break # Assume only one system message
-        if not updated:
-             print("WARNING: Could not find system message in Hub prompt structure to update. Using default Hub system message.")
-
-    except Exception as e:
-         print(f"ERROR modifying Hub prompt with pre-formatted template: {e}. Using default Hub system message.")
-    # <<< End Format and Modify System Message >>>
+    # --- Create ChatPromptTemplate directly ---
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt_template),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human", "{input}"),
+        ("ai", "{agent_scratchpad}")
+    ])
 
     # Create the ReAct agent
     agent = create_react_agent(llm, tools, prompt)
