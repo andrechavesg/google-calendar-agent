@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.env
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json # Often excluded in libraries, included in apps - your choice
+# built files - assuming you build within docker primarily
+# mcp_server/build/ 
+
+# Credentials / Secrets
+.credentials/
+*.keys.json
+*.token*.json
+
+# IDE / OS specific
+.idea/
+.vscode/
+*.DS_Store 

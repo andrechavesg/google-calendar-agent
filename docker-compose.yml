@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  calendar-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: calendar_agent_app
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./.env
+    volumes:
+      # Mount only the credentials directory (read-write needed for token saving)
+      - ./.credentials:/usr/src/app/.credentials:rw
+    restart: unless-stopped 
