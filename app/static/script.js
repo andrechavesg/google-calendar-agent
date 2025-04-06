@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', (event) => {
     localStorage.setItem('chatSessionId', sessionId);
     sessionIdSpan.textContent = sessionId.substring(0, 8); // Display part of the session ID
 
+    let currentBotMessageDiv = null; // To hold the div being streamed into
+
     function generateUUID() { // Public Domain/MIT
         let d = new Date().getTime();//Timestamp
         let d2 = ((typeof performance !== 'undefined') && performance.now && (performance.now()*1000)) || 0;//Time in microseconds since page-load or 0 if unsupported
@@ -38,34 +40,76 @@ document.addEventListener('DOMContentLoaded', (event) => {
 
         ws.onopen = function(event) {
             console.log('WebSocket connection opened');
-            console.log('ws.onopen - messageInput:', messageInput);
-            console.log('ws.onopen - sendButton:', sendButton);
             const initialMessageDiv = document.getElementById('initial-message');
             const initialMessage = initialMessageDiv ? initialMessageDiv.getAttribute('data-message') : "Connected! How can I help?";
             addMessage(initialMessage, 'bot-message');
-            // Use the already selected element
-            if (messageInput) messageInput.disabled = false;
-            if (sendButton) sendButton.disabled = false;
+            setButtonState(true); // Enable input now
         };
 
         ws.onmessage = function(event) {
-            console.log('Message from server:', event.data);
-            if (event.data !== "Processing your request...") {
-                addMessage(event.data, 'bot-message');
+            console.log('Raw message from server:', event.data);
+            try {
+                const data = JSON.parse(event.data);
+                console.log('Parsed message from server:', data);
+
+                if (data.type === 'start') {
+                    // Create a new div for the bot's response, but don't add text yet
+                    currentBotMessageDiv = document.createElement('div');
+                    currentBotMessageDiv.classList.add('message', 'bot-message', 'streaming');
+                    messagesDiv.appendChild(currentBotMessageDiv);
+                    setButtonState(false); // Disable input while streaming
+                } else if (data.type === 'stream' && data.token) {
+                    if (currentBotMessageDiv) {
+                        // Append the token to the current message div
+                        // Replace newline characters with <br> for HTML rendering
+                        const formattedToken = data.token.replace(/\n/g, '<br>');
+                        currentBotMessageDiv.innerHTML += formattedToken; 
+                        messagesDiv.scrollTop = messagesDiv.scrollHeight; // Auto-scroll
+                    }
+                } else if (data.type === 'end') {
+                    if (currentBotMessageDiv) {
+                        currentBotMessageDiv.classList.remove('streaming');
+                    }
+                    currentBotMessageDiv = null; // Reset for the next message
+                    setButtonState(true); // Re-enable input
+                    messageInput.focus(); // Focus input for next message
+                } else if (data.type === 'error') {
+                    addMessage(`Error: ${data.message}`, 'bot-message-error');
+                    if (currentBotMessageDiv) {
+                        currentBotMessageDiv.classList.remove('streaming');
+                    }
+                    currentBotMessageDiv = null; // Reset if an error occurred mid-stream
+                    setButtonState(true); // Re-enable input after error
+                     messageInput.focus();
+                } else {
+                     // Handle other message types or plain text if needed
+                    console.warn("Received unexpected message format:", data);
+                    // Fallback for non-JSON or unknown structure
+                    addMessage(event.data, 'bot-message'); 
+                    setButtonState(true);
+                }
+
+            } catch (e) {
+                // Handle cases where the message is not JSON (e.g., simple acknowledgments if any)
+                console.log('Received non-JSON message:', event.data);
+                // Decide how to handle plain text - maybe display it directly?
+                 // addMessage(event.data, 'system-message'); // Example: display as system message
+                 // setButtonState(true); // Re-enable button if it was just an ack
             }
-            setButtonState(true);
         };
 
         ws.onerror = function(event) {
             console.error('WebSocket error:', event);
-            addMessage('WebSocket connection error. Please try refreshing the page.', 'bot-message error');
+            addMessage('WebSocket connection error. Please try refreshing the page.', 'bot-message-error');
             setButtonState(false);
+             currentBotMessageDiv = null;
         };
 
         ws.onclose = function(event) {
             console.log('WebSocket connection closed:', event);
-            addMessage('Connection closed.', 'system-message');
+            addMessage('Connection closed. Attempting to reconnect...', 'system-message');
             setButtonState(false);
+            currentBotMessageDiv = null;
             setTimeout(connectWebSocket, 5000);
         };
     }
@@ -73,9 +117,11 @@ document.addEventListener('DOMContentLoaded', (event) => {
     function addMessage(message, type) {
         const messageElement = document.createElement('div');
         messageElement.classList.add('message', type);
-        messageElement.appendChild(document.createTextNode(message));
+        // Use innerHTML to render potential <br> tags from streaming
+        messageElement.innerHTML = message; 
         messagesDiv.appendChild(messageElement);
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        return messageElement; // Return the created element
     }
 
     function setButtonState(enabled) {
@@ -93,15 +139,15 @@ document.addEventListener('DOMContentLoaded', (event) => {
     function sendMessage() {
         const message = messageInput.value.trim();
         if (message && ws && ws.readyState === WebSocket.OPEN) {
-            addMessage(message, 'user-message');
-            ws.send(message);
+             // Display user message immediately using addMessage
+            addMessage(message, 'user-message'); 
+            ws.send(message); // Send plain text message to backend
             messageInput.value = '';
-            setButtonState(false);
+            setButtonState(false); // Disable input until response starts streaming
         } else if (!ws || ws.readyState !== WebSocket.OPEN) {
             addMessage('Cannot send message: Not connected to the server.', 'bot-message error');
-        } else if (!message) {
-            addMessage('Please type a message first.', 'bot-message error');
-        }
+        } 
+        // Removed redundant check for empty message as button state handles it
     }
 
     // --- Event Listeners ---
@@ -130,55 +176,10 @@ document.addEventListener('DOMContentLoaded', (event) => {
     }
 
     // Initial setup
-    setButtonState(false); // Disable button until connected
+    setButtonState(false); // Keep disabled initially
     connectWebSocket();
 
 }); // End DOMContentLoaded listener
-
-async function sendMessageToBackend(message) {
-    const messageInput = document.getElementById('message-input');
-    const sendButton = document.getElementById('send-button');
-
-    // Disable input and button
-    if(messageInput) messageInput.disabled = true;
-    if(sendButton) sendButton.disabled = true;
-
-    const loadingIndicator = appendMessage('Bot', '', true); // Show loading indicator
-
-    try {
-        const response = await fetch('/chat', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            // Make sure sessionId is defined and passed correctly
-            body: JSON.stringify({ message: message, session_id: window.sessionId || null }) // Example passing sessionId
-        });
-
-        chatBox.removeChild(loadingIndicator); // Remove loading indicator
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ detail: 'Network response was not ok.' }));
-            appendMessage('Bot', `Error: ${errorData.detail || 'Failed to get response'}`);
-            console.error('Error sending message:', errorData);
-        } else {
-            const data = await response.json();
-            appendMessage('Bot', data.response);
-        }
-    } catch (error) {
-        if (chatBox.contains(loadingIndicator)) {
-             chatBox.removeChild(loadingIndicator); // Remove loading indicator on error too
-        }
-        appendMessage('Bot', 'Error: Could not connect to the server.');
-        console.error('Fetch error:', error);
-    }
-    finally {
-        // Re-enable input and button
-        if(messageInput) messageInput.disabled = false;
-        if(sendButton) sendButton.disabled = false;
-        if(messageInput) messageInput.focus(); // Focus input for next message
-    }
-}
 
 
 

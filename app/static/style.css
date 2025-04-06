@@ -100,7 +100,8 @@ body {
     white-space: pre-wrap; /* Preserve whitespace and newlines */
 }
 
-.bot-message.error, .system-message /* Style system messages similarly to errors */
+.bot-message-error, /* Updated class name */
+.system-message /* Style system messages similarly to errors */
 {
     background-color: #ffebee;
     color: #c62828;
@@ -168,6 +169,19 @@ body {
 
 #send-button:disabled {
      background-color: #a0d2ff; /* Specific disabled background for button */
+}
+
+/* Blinking cursor for streaming messages */
+.bot-message.streaming::after {
+  content: '▋'; /* Blinking cursor character */
+  animation: blink 1s step-end infinite;
+  display: inline-block; /* Prevents line break */
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  from, to { color: transparent; }
+  50% { color: #050505; } /* Match bot message text color */
 }
 
 

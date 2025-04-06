@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI # Needed for summarizer
 from langchain_core.prompts import ChatPromptTemplate # Needed for summarizer
 from langchain_core.output_parsers import StrOutputParser # Needed for summarizer
-from .config_loader import get_config # <<< ADDED
+from config_loader import get_config # <<< ADDED
 
 load_dotenv()
 
